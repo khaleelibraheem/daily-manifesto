@@ -38,33 +38,34 @@ export default function DailyManifesto() {
     setSupabaseConfigured(configured);
   }, []);
 
-  const supabaseRequest = async (endpoint, method = "GET", body = null) => {
-    const options = {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        Prefer: "return=representation",
-      },
-    };
-
-    if (body) {
-      options.body = JSON.stringify(body);
-    }
-
-    const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/${endpoint}`,
-      options
-    );
-
-    if (!response.ok) {
-      throw new Error(`Error: ${response.statusText}`);
-    }
-
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
+const supabaseRequest = async (endpoint, method = "GET", body = null) => {
+  const options = {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      Prefer: "return=representation",
+    },
   };
+
+  if (body) {
+    options.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/${endpoint}`,
+    options
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Error: ${response.statusText} - ${errorText}`);
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+};
 
   const loadData = async () => {
     try {
@@ -131,58 +132,74 @@ export default function DailyManifesto() {
 
       try {
         const today = new Date().toISOString().slice(0, 10);
-        const stored = JSON.parse(localStorage.getItem("dailyQuoteGlobal"));
 
-        // ✅ Fetch latest quotes
+        // ✅ First, check if today's quote is already selected server-side
+        const existingDaily = await supabaseRequest(
+          `daily_quotes?select=quote_id,manifestos(*)&date=eq.${today}`
+        );
+
+        if (
+          existingDaily &&
+          existingDaily.length > 0 &&
+          existingDaily[0].manifestos
+        ) {
+          // Use the server-selected quote
+          setDailyQuote(existingDaily[0].manifestos);
+          return;
+        }
+
+        // ✅ If no quote exists for today, select one
         const quotes = await supabaseRequest(
           "manifestos?select=*&order=created_at.asc"
         );
 
         if (!quotes || quotes.length === 0) {
           setDailyQuote(null);
-          localStorage.removeItem("dailyQuoteGlobal");
           return;
         }
 
-        let quote = null;
-
-        // ✅ Check if today's stored quote still exists
-        if (stored && stored.date === today) {
-          const stillExists = quotes.some((q) => q.id === stored.quote.id);
-          if (stillExists) {
-            quote = stored.quote;
-          }
-        }
-
-        // ✅ Pick a consistent global quote if needed
-        if (!quote) {
-          // Sort deterministically by created_at (or id if preferred)
-          quotes.sort((a, b) => a.created_at.localeCompare(b.created_at));
-
-          // Generate a deterministic index from today's date
-          const dateHash = [...today].reduce(
-            (acc, char) => acc + char.charCodeAt(0),
-            0
-          );
-          const index = dateHash % quotes.length;
-
-          quote = quotes[index];
-        }
-
-        setDailyQuote(quote);
-
-        // ✅ Cache it for the day
-        localStorage.setItem(
-          "dailyQuoteGlobal",
-          JSON.stringify({ date: today, quote })
+        // Generate deterministic index from date
+        quotes.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        const dateHash = [...today].reduce(
+          (acc, char) => acc + char.charCodeAt(0),
+          0
         );
+        const index = dateHash % quotes.length;
+        const selectedQuote = quotes[index];
+
+        // ✅ Store the selection server-side (attempt, ignore conflicts)
+        try {
+          await supabaseRequest("daily_quotes", "POST", {
+            date: today,
+            quote_id: selectedQuote.id,
+          });
+        } catch (insertError) {
+          // Ignore duplicate key errors (race condition handled)
+          console.log("Daily quote already exists");
+        }
+
+        setDailyQuote(selectedQuote);
       } catch (error) {
         console.error("Error fetching daily quote:", error);
         setDailyQuote(null);
       }
     };
 
+    // Initial fetch
     fetchDailyQuote();
+
+    // Re-check when user returns to the tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchDailyQuote();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [supabaseConfigured]);
 
   // 🌟 Smooth View Switching with Data Refresh
