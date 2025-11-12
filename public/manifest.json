@@ -1,6 +1,6 @@
 {
   "name": "Daily Manifesto",
-  "short_name": "Manifesto",
+  "short_name": "Daily Manifesto",
   "description": "Write and share your daily intentions with the world. Express your truth, track your journey, and inspire others.",
   "start_url": "/",
   "scope": "/",
