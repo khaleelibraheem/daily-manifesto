@@ -828,7 +828,7 @@ const supabaseRequest = async (endpoint, method = "GET", body = null) => {
                       </div>
                       <button
                         onClick={() => downloadCard(m)}
-                        className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-white rounded-lg transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                        className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-white rounded-lg transition-all opacity-100"
                         title="Download"
                       >
                         <Download size={16} />
